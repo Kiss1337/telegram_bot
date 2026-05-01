@@ -1,44 +1,26 @@
 import logging
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
-import anthropic
 
-BOT_TOKEN = "8758967434:AAF0TgSw27aR2PKIebv__GBf-7zT_9f_b1A"
-ANTHROPIC_API_KEY = "ВАШ_КЛЮЧ_ANTHROPIC"
-ADMIN_ID = 0
-
-SYSTEM_PROMPT = """Ты — помощник бота-предложки для Telegram канала.
-Пользователи присылают тебе свои предложения: новости, идеи рубрик, темы для постов.
-Твоя задача:
-- Поблагодарить пользователя за предложение
-- Кратко прокомментировать идею
-- Сообщить что предложение передано администратору на рассмотрение
-Отвечай дружелюбно, по-русски, коротко (2-3 предложения)."""
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8758967434:AAF0TgSw27aR2PKIebv__GBf-7zT_9f_b1A")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
 logging.basicConfig(level=logging.INFO)
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Напиши своё предложение — новость, идею для рубрики или тему для поста!")
+    await update.message.reply_text(
+        "👋 Привет! Это бот-предложка.\n\n"
+        "Напиши своё предложение — новость, идею для рубрики или тему для поста!"
+    )
 
 async def handle_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     text = update.message.text
-    await update.message.reply_text("⏳ Обрабатываю твоё предложение...")
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=300,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": text}]
-        )
-        ai_reply = response.content[0].text
-    except Exception:
-        ai_reply = "Спасибо за предложение! Оно передано администратору. 🙏"
-    await update.message.reply_text(ai_reply)
+    await update.message.reply_text("✅ Спасибо за предложение! Мы рассмотрим его и скоро ответим. 🙏")
     username = f"@{user.username}" if user.username else f"ID: {user.id}"
     admin_text = f"📬 *Новое предложение*\n\n👤 От: {user.full_name} ({username})\n\n💬 *Текст:*\n{text}"
     keyboard = InlineKeyboardMarkup([[
@@ -76,4 +58,3 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_suggestion))
     print("✅ Бот запущен!")
     app.run_polling()
-      
