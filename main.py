@@ -1,15 +1,13 @@
 import logging
 import os
+import httpx
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
-
-client = genai.Client(api_key=GEMINI_KEY)
 
 user_histories = {}
 
@@ -32,17 +30,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_histories:
         user_histories[user_id] = []
 
-    user_histories[user_id].append({"role": "user", "parts": [{"text": user_text}]})
+    user_histories[user_id].append({"role": "user", "content": user_text})
 
     await update.message.chat.send_action("typing")
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=user_histories[user_id]
-    )
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
+            json={
+                "model": "meta-llama/llama-3.1-8b-instruct:free",
+                "messages": user_histories[user_id]
+            },
+            timeout=30
+        )
+        data = response.json()
 
-    reply = response.text
-    user_histories[user_id].append({"role": "model", "parts": [{"text": reply}]})
+    reply = data["choices"][0]["message"]["content"]
+    user_histories[user_id].append({"role": "assistant", "content": reply})
 
     await update.message.reply_text(reply)
 
