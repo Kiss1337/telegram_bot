@@ -2,40 +2,49 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
 
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_KEY)
 
-user_chats = {}
+user_histories = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Привет! Я AI ассистент на базе Gemini.\n\n"
-        "Просто напиши мне что-нибудь!\n"
-        "/clear — очистить историю диалога."
+        "👋 Привет! Я AI ассистент.\n\n"
+        "Напиши мне что-нибудь!\n"
+        "/clear — очистить историю."
     )
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_chats[user_id] = model.start_chat(history=[])
+    user_histories[user_id] = []
     await update.message.reply_text("🗑️ История очищена!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    user_text = update.message.text
 
-    if user_id not in user_chats:
-        user_chats[user_id] = model.start_chat(history=[])
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+
+    user_histories[user_id].append({"role": "user", "parts": [{"text": user_text}]})
 
     await update.message.chat.send_action("typing")
 
-    response = user_chats[user_id].send_message(update.message.text)
-    await update.message.reply_text(response.text)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=user_histories[user_id]
+    )
+
+    reply = response.text
+    user_histories[user_id].append({"role": "model", "parts": [{"text": reply}]})
+
+    await update.message.reply_text(reply)
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
