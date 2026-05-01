@@ -1,60 +1,58 @@
 import logging
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters, ContextTypes
-)
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import anthropic
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8758967434:AAF0TgSw27aR2PKIebv__GBf-7zT_9f_b1A")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
 
+client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+user_histories = {}
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Привет! Это бот-предложка.\n\n"
-        "Напиши своё предложение — новость, идею для рубрики или тему для поста!"
+        "👋 Привет! Я AI ассистент.\n\n"
+        "Просто напиши мне что-нибудь и я отвечу!\n"
+        "Команда /clear — очистить историю диалога."
     )
 
-async def handle_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    text = update.message.text
-    await update.message.reply_text("✅ Спасибо за предложение! Мы рассмотрим его и скоро ответим. 🙏")
-    username = f"@{user.username}" if user.username else f"ID: {user.id}"
-    admin_text = f"📬 *Новое предложение*\n\n👤 От: {user.full_name} ({username})\n\n💬 *Текст:*\n{text}"
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user.id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user.id}"),
-    ]])
-    try:
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown", reply_markup=keyboard)
-    except Exception:
-        pass
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_histories[user_id] = []
+    await update.message.reply_text("🗑️ История очищена!")
 
-async def handle_admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("⛔ Только для администратора", show_alert=True)
-        return
-    action, user_id = query.data.split("_", 1)
-    if action == "accept":
-        result_text = "✅ *Принято*"
-        user_msg = "🎉 Ваше предложение было *принято* администратором!"
-    else:
-        result_text = "❌ *Отклонено*"
-        user_msg = "Ваше предложение рассмотрено, но на этот раз не подошло. Присылайте новые идеи! 💪"
-    await query.edit_message_text(text=f"{query.message.text}\n\n{result_text}", parse_mode="Markdown")
-    try:
-        await context.bot.send_message(chat_id=int(user_id), text=user_msg, parse_mode="Markdown")
-    except Exception:
-        pass
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_text = update.message.text
+
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+
+    user_histories[user_id].append({"role": "user", "content": user_text})
+    history = user_histories[user_id][-20:]
+
+    await update.message.chat.send_action("typing")
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        system="Ты умный AI ассистент. Отвечай на русском если пользователь пишет на русском.",
+        messages=history
+    )
+
+    reply = response.content[0].text
+    user_histories[user_id].append({"role": "assistant", "content": reply})
+
+    await update.message.reply_text(reply)
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_admin_decision))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_suggestion))
+    app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("✅ Бот запущен!")
     app.run_polling()
